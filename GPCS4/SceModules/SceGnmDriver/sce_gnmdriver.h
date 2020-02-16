@@ -114,7 +114,13 @@ int PS4API sceGnmDrawIndirectCountMulti(uint32_t* cmdBuffer, uint32_t numDwords)
 int PS4API sceGnmDrawIndirectMulti(uint32_t* cmdBuffer, uint32_t numDwords);
 
 
-uint32_t PS4API sceGnmDrawInitDefaultHardwareState350(uint32_t* cmdBuffer, uint64_t cmdSize);
+uint32_t PS4API sceGnmDrawInitDefaultHardwareState350(uint32_t* cmdBuffer, uint64_t numDwords);
+
+
+uint32_t PS4API sceGnmDrawInitDefaultHardwareState200(uint32_t* cmdBuffer, uint64_t numDwords);
+
+
+uint32_t PS4API sceGnmDrawInitDefaultHardwareState175(uint32_t* cmdBuffer, uint64_t numDwords);
 
 
 int PS4API sceGnmDrawOpaqueAuto(uint32_t* cmdBuffer, uint32_t numDwords);
@@ -189,7 +195,7 @@ int PS4API sceGnmInsertThreadTraceMarker(void);
 int PS4API sceGnmInsertWaitFlipDone(uint32_t* cmdBuffer, uint32_t numDwords, int videoOutHandle, uint32_t displayBufferIndex);
 
 
-int PS4API sceGnmIsUserPaEnabled(void);
+bool PS4API sceGnmIsUserPaEnabled(void);
 
 
 int PS4API sceGnmLogicalCuIndexToPhysicalCuIndex(void);
@@ -385,6 +391,26 @@ int PS4API sceGnmValidateResetState(void);
 
 int PS4API sceGnmValidationRegisterMemoryCheckCallback(void);
 
+
+int PS4API sceGnmSetCsShader(uint32_t* cmdBuffer, uint32_t numDwords, const pssl::CsStageRegisters *csRegs, uint32_t shaderModifier);
+
+
+int PS4API sceGnmSetPsShader(uint32_t* cmdBuffer, uint32_t numDwords, const pssl::PsStageRegisters *psRegs);
+
+
+int PS4API sceGnmUpdatePsShader(uint32_t* cmdBuffer, uint32_t numDwords, const pssl::PsStageRegisters *psRegs);
+
+
+int PS4API sceGnmValidateCommandBuffers(void);
+
+
+int PS4API sceRazorCaptureCommandBuffersOnlyImmediate(void);
+
+
+int PS4API sceRazorCaptureCommandBuffersOnlySinceLastFlip(void);
+
+
+int PS4API sceRazorCaptureSinceLastFlip(void);
 
 
 

@@ -1,11 +1,14 @@
 #include "sce_libkernel.h"
 #include "sce_pthread_common.h"
 #include "sce_kernel_scepthread.h"
-#include <utility>
-#include "Platform/PlatformUtils.h"
-#include "Emulator/TLSHandler.h"
 #include "MapSlot.h"
 
+#include "Platform/PlatformUtils.h"
+#include "Emulator/TLSHandler.h"
+
+#include <utility>
+
+LOG_CHANNEL(SceModules.SceLibkernel.scepthread);
 
 //////////////////////////////////////////////////////////////////////////
 
@@ -149,7 +152,21 @@ int PS4API scePthreadMutexInit(ScePthreadMutex *mutex, const ScePthreadMutexattr
 	{
 		LOG_FIXME("set name is not supported yet.")
 	}
-	int err = pthread_mutex_init((pthread_mutex_t*)mutex, (pthread_mutexattr_t*)attr);
+	int err = 0;
+	if (attr == nullptr)
+	{
+		// If attr is nullptr then default will be used which is PTHREAD_MUTEX_ERRORCHECK on PS4
+		// so we make sure we set PTHREAD_MUTEX_ERRORCHECK here to match behaviour.
+		pthread_mutexattr_t errorCheckMutexAttr;
+		pthread_mutexattr_init(&errorCheckMutexAttr);
+		pthread_mutexattr_settype(&errorCheckMutexAttr, PTHREAD_MUTEX_ERRORCHECK);
+		err = pthread_mutex_init((pthread_mutex_t*)mutex, &errorCheckMutexAttr);
+		pthread_mutexattr_destroy(&errorCheckMutexAttr);
+	}
+	else
+	{
+		err = pthread_mutex_init((pthread_mutex_t*)mutex, (pthread_mutexattr_t*)attr);
+	}
 	return pthreadErrorToSceError(err);
 }
 
@@ -164,8 +181,7 @@ int PS4API scePthreadMutexDestroy(ScePthreadMutex *mutex)
 
 int PS4API scePthreadMutexLock(ScePthreadMutex *mutex)
 {
-	// too many logs, not necessary
-	//LOG_SCE_TRACE("mutex %p", mutex);
+	LOG_SCE_TRACE("mutex %p", mutex);
 	int err = pthread_mutex_lock((pthread_mutex_t*)mutex);
 	return pthreadErrorToSceError(err);
 }
@@ -173,8 +189,7 @@ int PS4API scePthreadMutexLock(ScePthreadMutex *mutex)
 
 int PS4API scePthreadMutexUnlock(ScePthreadMutex *mutex)
 {
-	// too many logs, not necessary
-	//LOG_SCE_TRACE("mutex %p", mutex);
+	LOG_SCE_TRACE("mutex %p", mutex);
 	int err = pthread_mutex_unlock((pthread_mutex_t*)mutex);
 	return pthreadErrorToSceError(err);
 }

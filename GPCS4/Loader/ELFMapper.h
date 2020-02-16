@@ -17,16 +17,18 @@ public:
 	ELFMapper(ELFMapper const &) = delete;
 	void operator=(ELFMapper const &) = delete;
 
-	bool loadFile(std::string const &filePath, MemoryMappedModule *mod);
+	bool loadFile(std::string const &filePath, NativeModule *mod);
 	bool validateHeader();
 	bool parseSegmentHeaders();
 	bool parseDynamicSection();
-	bool mapImageIntoMemroy();
+	bool mapImageIntoMemory();
 	bool parseSymbols();
 
+	void *getProcParam() const;
+
 private:
-	bool prepareTables(Elf64_Dyn const &entry, uint index);
-	bool parseSingleDynEntry(Elf64_Dyn const &entry, uint index);
+	bool prepareTables(Elf64_Dyn const &entry, uint32_t index);
+	bool parseSingleDynEntry(Elf64_Dyn const &entry, uint32_t index);
 	size_t calculateTotalLoadableSize();
 	bool isSegmentLoadable(Elf64_Phdr const &hdr);
 
@@ -34,5 +36,5 @@ private:
 	bool mapSecReloSegment(Elf64_Phdr const &phdr);
 	bool mapDataSegment(Elf64_Phdr const &phdr);
 
-	MemoryMappedModule *m_moduleData;
+	NativeModule *m_moduleData;
 };

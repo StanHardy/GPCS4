@@ -1,25 +1,33 @@
 #include "ModuleLoader.h"
+
 #include "Platform/PlatformUtils.h"
 
+LOG_CHANNEL(Loader.ModuleLoader);
+
+#define ADD_BLACK_MODULE(name) (name".sprx")
+
+const std::set<std::string> ModuleLoader::m_moduleInitBlackList = 
+{
+	ADD_BLACK_MODULE("libSceNpScoreRanking"),
+	ADD_BLACK_MODULE("libSceAppContent"),
+	ADD_BLACK_MODULE("libSceDipsw"),
+};
 
 ModuleLoader::ModuleLoader(CSceModuleSystem &modSystem,
-						   CLinker &linker,
-						   CTLSHandler &tlsHandler)
+						   CLinker &linker)
 	: 
 	m_modSystem{ modSystem }, 
-	m_tlsHandler{ tlsHandler },
 	m_linker{ linker }
 {
 }
 
 bool ModuleLoader::loadModule(std::string const &fileName,
-							  MemoryMappedModule **modOut)
+							  NativeModule **modOut)
 {
 	bool retVal = false;
-
 	do
 	{
-		MemoryMappedModule mod = {};
+		NativeModule mod = {};
 
 		bool exist = false;
 		retVal = loadModuleFromFile(fileName, &mod, &exist);
@@ -29,11 +37,11 @@ bool ModuleLoader::loadModule(std::string const &fileName,
 		}
 
 // Output NIDs of functions that are not implemented in HLE.
-#ifdef OUTPUT_NOT_IMPLEMENTED_HLE
+#ifdef MODSYS_OUTPUT_NOT_IMPLEMENTED_HLE
 		mod.outputUnresolvedSymbols("unresolved_HLE.txt");
-#endif // OUTPUT_NOT_IMPLEMENTED_HLE
+#endif // MODSYS_OUTPUT_NOT_IMPLEMENTED_HLE
 
-		retVal = m_modSystem.registerMemoryMappedModule(mod.fileName, std::move(mod));
+		retVal = m_modSystem.registerNativeModule(mod.fileName, std::move(mod));
 		if (!retVal)
 		{
 			LOG_ERR("Failed to register module: %s", mod.fileName.c_str());
@@ -58,7 +66,7 @@ bool ModuleLoader::loadModule(std::string const &fileName,
 			break;
 		}
 
-		*modOut = &(m_modSystem.getMemoryMappedModules()[0]);
+		*modOut = &(m_modSystem.getAllNativeModules()[0]);
 		retVal  = true;
 	} while (false);
 
@@ -66,7 +74,7 @@ bool ModuleLoader::loadModule(std::string const &fileName,
 }
 
 bool ModuleLoader::loadModuleFromFile(std::string const &fileName,
-									  MemoryMappedModule *mod,
+									  NativeModule *mod,
 									  bool *exist)
 {
 	LOG_ASSERT(mod != nullptr, "mod is nullpointer");
@@ -82,7 +90,7 @@ bool ModuleLoader::loadModuleFromFile(std::string const &fileName,
 			break;
 		}
 
-		bool isLoaded = m_modSystem.isMemoryMappedModuleLoaded(mod->fileName);
+		bool isLoaded = m_modSystem.isNativeModuleLoaded(mod->fileName);
 		if (isLoaded)
 		{
 			LOG_DEBUG("module %s has already been loaded", mod->fileName.c_str());
@@ -115,7 +123,7 @@ bool ModuleLoader::loadModuleFromFile(std::string const &fileName,
 			break;
 		}
 
-		retVal = m_mapper.mapImageIntoMemroy();
+		retVal = m_mapper.mapImageIntoMemory();
 		if (!retVal)
 		{
 			break;
@@ -151,6 +159,7 @@ bool ModuleLoader::loadModuleFromFile(std::string const &fileName,
 bool ModuleLoader::loadDependencies()
 {
 	bool retVal = true;
+	bool moduleNotFoundIgnore = false;
 
 	while (!m_filesToLoad.empty())
 	{
@@ -173,25 +182,23 @@ bool ModuleLoader::loadDependencies()
 		}
 
 		bool exist = false;
-		auto mod = MemoryMappedModule{};
+		auto mod = NativeModule{};
 		retVal   = loadModuleFromFile(path, &mod, &exist);
 		if (!retVal)
 		{
 			LOG_ERR("Failed to load module %s", fileName.c_str());
 
-			if (IGNORE_NOT_FOUND_MODULES)
-			{
-				retVal = true;
-			}
-			else
-			{
-				break;
-			}
+#ifdef MODSYS_IGNORE_NOT_FOUND_MODULES
+			moduleNotFoundIgnore = true;
+			continue;
+#else  // MODSYS_IGNORE_NOT_FOUND_MODULES
+			break;
+#endif // MODSYS_IGNORE_NOT_FOUND_MODULES
 		}
 
 		if (!exist)
 		{
-			retVal = m_modSystem.registerMemoryMappedModule(mod.fileName, std::move(mod));
+			retVal = m_modSystem.registerNativeModule(mod.fileName, std::move(mod));
 			if (!retVal)
 			{
 				LOG_ERR("Failed to register module: %s", mod.fileName.c_str());
@@ -200,10 +207,10 @@ bool ModuleLoader::loadDependencies()
 		}
 	}
 
-	return retVal;
+	return retVal || moduleNotFoundIgnore;
 }
 
-bool ModuleLoader::addDepedenciesToLoad(MemoryMappedModule const &mod)
+bool ModuleLoader::addDepedenciesToLoad(NativeModule const &mod)
 {
 	for (auto const &file : mod.getNeededFiles())
 	{
@@ -268,7 +275,7 @@ bool ModuleLoader::mapFilePathToModuleName(std::string const &filePath,
 	return retVal;
 }
 
-bool ModuleLoader::registerSymbol(MemoryMappedModule const &mod,
+bool ModuleLoader::registerSymbol(NativeModule const &mod,
 								  std::string const &encName,
 								  void *pointer)
 {
@@ -285,7 +292,7 @@ bool ModuleLoader::registerSymbol(MemoryMappedModule const &mod,
 			break;
 		}
 
-		retVal = m_modSystem.registerFunction(modName, libName, nid, pointer);
+		retVal = m_modSystem.registerNativeSymbol(modName, libName, nid, pointer);
 		if (!retVal)
 		{
 			break;
@@ -297,58 +304,70 @@ bool ModuleLoader::registerSymbol(MemoryMappedModule const &mod,
 	return retVal;
 }
 
-bool ModuleLoader::registerSymbol(MemoryMappedModule const &mod, size_t idx)
+bool ModuleLoader::registerSymbol(NativeModule const &mod, size_t idx)
 {
 	const SymbolInfo *info = nullptr;
 	mod.getSymbol(idx, &info);
 
 	if (info->isEncoded)
 	{
-		m_modSystem.registerFunction(info->moduleName, info->libraryName, info->nid,
+		m_modSystem.registerNativeSymbol(info->moduleName, info->libraryName, info->nid,
 									 reinterpret_cast<void *>(info->address));
 	}
 	else
 	{
-		m_modSystem.registerSymbol(info->moduleName, info->libraryName,
-								   info->symbolName,
-								   reinterpret_cast<void *>(info->address));
+		m_modSystem.registerNativeSymbol(info->moduleName, info->libraryName,
+										 info->symbolName,
+										 reinterpret_cast<void *>(info->address));
 	}
 
 	return true;
 }
 
+
 bool ModuleLoader::initializeModules()
 {
-	auto &mods  = m_modSystem.getMemoryMappedModules();
+	auto &mods  = m_modSystem.getAllNativeModules();
 	bool retVal = true;
 
+	auto tlsManager = TLSManager::GetInstance();
+	uint32_t tlsIndex = TLS_MODULE_ID_MAIN;
 	// intialize TLS
 	for (auto const &mod : mods)
 	{
-		//auto const &mod = mods[0];
-
 		void *pTls     = nullptr;
-		uint initSize  = 0;
-		uint totalSize = 0;
-
-		retVal = mod.getTLSInfo(&pTls, &initSize, &totalSize);
+		uint32_t initSize  = 0;
+		uint32_t totalSize = 0;
+		uint32_t align     = 0;
+		retVal         = mod.getTLSInfo(&pTls, &initSize, &totalSize, &align);
 		if (!retVal || pTls == nullptr)
 		{
 			LOG_DEBUG("no TLS info for module:%s", mod.fileName.c_str());
 			continue;
 		}
 
-		retVal = m_tlsHandler.initialize(pTls, initSize, totalSize);
-		if (!retVal)
-		{
-			LOG_ERR("fail to initialize TLS for module:%s", mod.fileName.c_str());
-			continue;
-		}
+		TLSBlock block;
+		block.address   = pTls;
+		block.initSize  = initSize;
+		block.totalSize = totalSize;
+		block.align     = align;
+		block.index     = tlsIndex;
+		block.isDynamic = false;
+		block.offset    = 0;
+		tlsManager->registerTLSBlock(block);
+		
+		++tlsIndex;
 	}
 
 	// skip eboot.bin
 	for (size_t i = 1; i < mods.size(); i++)
 	{
+		if (m_moduleInitBlackList.find(mods[i].fileName) != m_moduleInitBlackList.end())
+		{
+			// skip black list modules
+			continue;
+		}
+
 		int ret = mods[i].initialize();
 		if (ret != 0)
 		{
@@ -361,3 +380,5 @@ bool ModuleLoader::initializeModules()
 
 	return retVal;
 }
+
+

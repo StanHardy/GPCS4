@@ -2,42 +2,129 @@
 #include "SceModuleSystem.h"
 #include "sce_modules.h"
 
+LOG_CHANNEL(Emulator);
 
-#define REGISTER_MODULE(name) \
-if (!pModuleSystem->RegisterModule(name))\
-{\
-	LOG_ERR("Register module failed: %s", name.szModuleName ? name.szModuleName : "null" );\
-	break;\
+
+#define REGISTER_MODULE(name)                                                                  \
+	if (!pModuleSystem->registerBuiltinModule(name))                                           \
+	{                                                                                          \
+		LOG_ERR("Register module failed: %s", name.szModuleName ? name.szModuleName : "null"); \
+		break;                                                                                 \
+	}
+
+static bool registerLibC(CSceModuleSystem* pModuleSystem)
+{
+	bool ret = false;
+	do
+	{
+		if (!pModuleSystem)
+		{
+			break;
+		}
+		auto& policyManager = pModuleSystem->getPolicyManager();
+
+		/** 
+		 * Defines policy for libc.
+		 * 
+		 * The default policy for this module is Policy::UseBuitlin,
+		 * which means when a sub-library of libc is not defined, 
+		 * it applies the Policy::UseBuiltin by default. 
+		 * 
+		 * The libc sub-library uses implementations from native modules
+		 * except the symbols listed below.
+		 */
+		policyManager.declareModule("libc").withDefault(Policy::UseBuiltin)
+			.declareSubLibrary("libc").with(Policy::UseNative).except
+			({ 
+				0xC5E60EE2EEEEC89DULL, // fopen
+				0xAD0155057A7F0B18ULL, // fssek
+				0x41ACF2F0B9974EFCULL, // ftell
+				0x95B07E52566A546DULL, // fread
+				0xBA874B632522A76DULL, // fclose
+				0x8105FEE060D08E93ULL, // malloc
+				0x63B689D6EC9D3CCAULL, // realloc
+				0xD97E5A8058CAC4C7ULL, // calloc
+				0xB4886CAA3D2AB051ULL, // free
+				0x5CA45E82C1691299ULL, // catchReturnFromMain
+				0xB8C7A2D56F6EC8DAULL, // exit
+				0xC0B9459301BD51C4ULL, // time
+				0x80D435576BDF5C31ULL, // setjmp
+				0x94A10DD8879B809DULL  // longjmp
+			 });
+
+		/*
+		 * Defines policy for libSceLibcInternal
+		 *
+		 * We load all of its symbols
+		 */
+		policyManager
+			.declareModule("libSceLibcInternal").withDefault(Policy::UseNative);
+
+
+		ret  = true;
+	}while(false);
+	return ret;
 }
 
-#define ALLOW_MODULE_OVERRIDE(name) \
-if(!pModuleSystem->setModuleOverridability(name, true)) \
-{\
-	LOG_ERR("Fail to set overridability for module %s", name);\
-	break;\
-}\
+static bool registerLibKernel(CSceModuleSystem* pModuleSystem)
+{
+	bool ret = false;
+	do
+	{
+		if (!pModuleSystem)
+		{
+			break;
+		}
 
-#define ALLOW_LIBRARY_OVERRIDE(mod, lib, policy) \
-if(!pModuleSystem->setLibraryOverridability(mod, lib, true, policy))\
-{\
-	LOG_ERR("Fail to set overridability for library %s", lib);\
-	break;\
-}\
+		auto& policyManager = pModuleSystem->getPolicyManager();
 
-#define ALLOW_FUNCTION_OVERRIDE(mod, lib, nid) \
-if (!pModuleSystem->setFunctionOverridability(mod, lib, nid, true)) \
-{\
-	LOG_ERR("Fail to set overridability for library %llx", nid);\
-	break;\
+		/** 
+		 * Defines policy for libkernel.
+		 * 
+		 * The default policy for this module is Policy::UseBuitlin,
+		 * which means when a sub-library of libkernel is not defined, 
+		 * it applies the Policy::UseBuiltin policy by default. 
+		 * 
+		 * The libc sub-library uses implementations from builtin modules
+		 * except the symbols listed below.
+		 */
+		policyManager.declareModule("libkernel").withDefault(Policy::UseBuiltin)
+			.declareSubLibrary("libkernel").with(Policy::UseBuiltin).except
+			({ 
+				0xF41703CA43E6A352,  // __error
+				0x581EBA7AFBBC6EC5,  // sceKernelGetCompiledSdkVersion
+				0x8E1FBC5E22B82DE1,  // sceKernelIsAddressSanitizerEnabled
+				0x0F8CA56B7BF1E2D6,  // sceKernelError
+			 });
+
+
+		ret  = true;
+	}while(false);
+	return ret;
 }
 
-#define DISALLOW_FUNCTION_OVERRIDE(mod, lib, nid) \
-if (!pModuleSystem->setFunctionOverridability(mod, lib, nid, false)) \
-{\
-	LOG_ERR("Fail to set overridability for library %llx", nid);\
-	break;\
+static bool registerOtherModules(CSceModuleSystem *pModuleSystem)
+{
+	bool ret = false;
+
+	do
+	{
+		if (!pModuleSystem)
+		{
+			break;
+		}
+
+		auto& policyManager = pModuleSystem->getPolicyManager();
+
+		policyManager
+			.declareModule("libSceNpCommon").withDefault(Policy::UseNative);
+
+		ret = true;
+	} while (false);
+
+	return ret;
 }
-			
+
 
 bool CEmulator::registerModules()
 {
@@ -96,34 +183,42 @@ bool CEmulator::registerModules()
 		REGISTER_MODULE(g_ExpModuleSceVideoOut);
 		REGISTER_MODULE(g_ExpModuleSceVideoRecording);
 
-		using Policy = CSceModuleSystem::LibraryRecord::OverridingPolicy;
+		//USE_NATIVE_MODULE("libSceNpCommon");
+		if (!registerLibKernel(pModuleSystem))
+		{
+			break;
+		}
 
-		ALLOW_MODULE_OVERRIDE("libSceLibcInternal");
+		if (!registerLibC(pModuleSystem))
+		{
+			break;
+		}
 
-		ALLOW_LIBRARY_OVERRIDE("libkernel", "libkernel", Policy::AllowList);
-		ALLOW_FUNCTION_OVERRIDE("libkernel", "libkernel", 0xF41703CA43E6A352);
+		if (!registerOtherModules(pModuleSystem))
+		{
+			break;
+		}
 
-		ALLOW_LIBRARY_OVERRIDE("libc", "libc", Policy::DisallowList);
-		// fopen
-		DISALLOW_FUNCTION_OVERRIDE("libc", "libc", 14260101637949278365ULL);
-		// fseek
-		DISALLOW_FUNCTION_OVERRIDE("libc", "libc", 12466338725556587288ULL);
-		// ftell
-		DISALLOW_FUNCTION_OVERRIDE("libc", "libc", 4732424424179322620ULL);
-		// fread
-		DISALLOW_FUNCTION_OVERRIDE("libc", "libc", 10786259999654564973ULL);
-		// fclose
-		DISALLOW_FUNCTION_OVERRIDE("libc", "libc", 13440794502107408237ULL);
-		// malloc
-		DISALLOW_FUNCTION_OVERRIDE("libc", "libc", 9297117245426667155ULL);
-		// free
-		DISALLOW_FUNCTION_OVERRIDE("libc", "libc", 13008767002086125649ULL);
-		// catchReturnFromMain
-		DISALLOW_FUNCTION_OVERRIDE("libc", "libc", 0x5CA45E82C1691299ULL);
-		// exit
-		DISALLOW_FUNCTION_OVERRIDE("libc", "libc", 0xB8C7A2D56F6EC8DAULL);
-		// time
-		DISALLOW_FUNCTION_OVERRIDE("libc", "libc", 0xC0B9459301BD51C4ULL);
+		// Yes, the policy is testable now
+
+		//auto testPolicy = [&]() {
+		//	auto pm = pModuleSystem->getPolicyManager();
+
+		//	auto p1 = pm.getSymbolPolicy("libc", "libc", 0xC5E60EE2EEEEC89DULL);
+		//	LOG_ASSERT(p1 == Policy::UseBuiltin, "policy error");
+
+		//	auto p2 = pm.getSymbolPolicy("libkernel", "libkernel", 0xF41703CA43E6A352);
+		//	LOG_ASSERT(p2 == Policy::UseNative, "policy error2");
+
+		//	auto p3 = pm.getSymbolPolicy("libSceNgs2", "libSceNgs2", 0xDE908D6D5335D540);
+		//	LOG_ASSERT(p3 == Policy::UseNative, "policy error3");
+
+		//	auto p4 = pm.getSymbolPolicy("libSceLibcInternal", "libSceLibcInternal", 0x80D435576BDF5C31);
+		//	LOG_ASSERT(p4 == Policy::UseNative, "policy error4");
+		//};
+
+		//testPolicy();
+
 		bRet = true;
 	} while (false);
 	return bRet;
